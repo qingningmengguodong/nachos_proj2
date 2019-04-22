@@ -1,10 +1,15 @@
 package nachos.userprog;
 
 import nachos.machine.*;
+
 import nachos.threads.*;
 import nachos.userprog.*;
 
+
+
 import java.io.EOFException;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Encapsulates the state of a user process that is not contained in its
@@ -27,6 +32,9 @@ public class UserProcess {
 	pageTable = new TranslationEntry[numPhysPages];
 	for (int i=0; i<numPhysPages; i++)
 	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+	for (int i=2; i<16; i++)
+		FileDescriptorUsed[i] = false;
+	FileDescriptorUsed[0] = FileDescriptorUsed[1] = true;
     }
     
     /**
@@ -345,6 +353,30 @@ public class UserProcess {
 	Lib.assertNotReached("Machine.halt() did not halt machine!");
 	return 0;
     }
+    
+    /**
+     * Handle the create() system call.
+     */
+    private int handleCreate(String FileName) {
+    	
+    OpenFile f = ThreadedKernel.fileSystem.open(FileName, true);
+    if (f == null)
+    	return -1;
+    
+    int fileDescriptor = -1;
+    for (int i = 2; i < 16; i++) 
+    	if (!FileDescriptorUsed[i]) {
+    		fileDescriptor = i;
+    		FileDescriptorUsed[i] = true;
+    		break;
+    	}
+    if (fileDescriptor == -1)
+    	return -1;
+    
+    FileTable.put(fileDescriptor, f);
+    return fileDescriptor;
+    
+    }
 
 
     private static final int
@@ -391,7 +423,10 @@ public class UserProcess {
 	switch (syscall) {
 	case syscallHalt:
 	    return handleHalt();
-
+	case syscallCreate: {
+		String FileName = readVirtualMemoryString(a0, 256);
+		return handleCreate(FileName);
+	}
 
 	default:
 	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
@@ -443,7 +478,9 @@ public class UserProcess {
     
     private int initialPC, initialSP;
     private int argc, argv;
-	
+    private HashMap FileTable = new HashMap(16);
+	private boolean[] FileDescriptorUsed = new boolean[16];
+    
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';
 }

@@ -357,11 +357,12 @@ public class UserProcess {
     /**
      * Handle the create() system call.
      */
-    private int handleCreate(String FileName) {
-    	
-    OpenFile f = ThreadedKernel.fileSystem.open(FileName, true);
-    if (f == null)
+    private int handleCreateOrOpen(String FileName, boolean create) {    	
+    OpenFile f = ThreadedKernel.fileSystem.open(FileName, create);
+    if (f == null) {
+    	System.out.println("file does not exist");
     	return -1;
+    }
     
     int fileDescriptor = -1;
     for (int i = 2; i < 16; i++) 
@@ -375,7 +376,14 @@ public class UserProcess {
     
     FileTable.put(fileDescriptor, f);
     return fileDescriptor;
+    }
     
+    private int handleCreate(String FileName) {
+    	return handleCreateOrOpen(FileName, true);
+    }
+    
+    private int handleOpen(String FileName) {
+    	return handleCreateOrOpen(FileName, false);
     }
 
 
@@ -420,12 +428,17 @@ public class UserProcess {
      * @return	the value to be returned to the user.
      */
     public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
+    System.out.println(syscall);
 	switch (syscall) {
 	case syscallHalt:
 	    return handleHalt();
 	case syscallCreate: {
 		String FileName = readVirtualMemoryString(a0, 256);
 		return handleCreate(FileName);
+	}
+	case syscallOpen: {
+		String FileName = readVirtualMemoryString(a0, 256);
+		return handleOpen(FileName);
 	}
 
 	default:

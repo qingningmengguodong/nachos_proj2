@@ -440,6 +440,17 @@ public class UserProcess {
 		String FileName = readVirtualMemoryString(a0, 256);
 		return handleOpen(FileName);
 	}
+	case syscallRead: {
+		OpenFile f = (OpenFile)FileTable.get(a0);
+		byte[] buf = new byte[a2+1];
+		int readLength = f.read(0, buf, 0 , a2);
+		if (readLength != -1)
+			writeVirtualMemory(a1, buf);
+		//String content = new String(buf);
+		//System.out.println(content);
+		System.out.println(readLength);
+		return readLength;
+	}
 
 	default:
 	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);

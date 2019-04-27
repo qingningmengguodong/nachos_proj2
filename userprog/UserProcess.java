@@ -32,8 +32,10 @@ public class UserProcess {
 	pageTable = new TranslationEntry[numPhysPages];
 	for (int i=0; i<numPhysPages; i++)
 	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
-	for (int i=2; i<16; i++)
+	for (int i=2; i<16; i++) {
 		FileDescriptorUsed[i] = false;
+		FilePosition[i] = 0;
+	}
 	FileDescriptorUsed[0] = FileDescriptorUsed[1] = true;
     }
     
@@ -438,18 +440,37 @@ public class UserProcess {
 	}
 	case syscallOpen: {
 		String FileName = readVirtualMemoryString(a0, 256);
+		System.out.println(FileName);
 		return handleOpen(FileName);
 	}
 	case syscallRead: {
 		OpenFile f = (OpenFile)FileTable.get(a0);
 		byte[] buf = new byte[a2+1];
-		int readLength = f.read(0, buf, 0 , a2);
-		if (readLength != -1)
+		int readLength = f.read(FilePosition[a0], buf, 0, a2);
+		if (readLength != -1) {
 			writeVirtualMemory(a1, buf);
+			FilePosition[a0] += readLength;
+ 		}
 		//String content = new String(buf);
 		//System.out.println(content);
-		System.out.println(readLength);
+		//System.out.println(readLength);
 		return readLength;
+	}
+	case syscallWrite: {
+		OpenFile f = (OpenFile)FileTable.get(a0);
+		byte[] buf = new byte[256];
+		//String str = readVirtualMemoryString(a1, 256);
+		//System.out.println(str);
+		//buf = str.getBytes();
+		readVirtualMemory(a1, buf);
+		
+		//String str = "I am so good!";
+		//byte[] buf = str.getBytes();
+		int writeLength = f.write(FilePosition[a0], buf, 0, a2);
+		if (writeLength == -1 || writeLength < a2)
+			return -1;
+		FilePosition[a0] += writeLength;
+		return writeLength;
 	}
 
 	default:
@@ -504,6 +525,7 @@ public class UserProcess {
     private int argc, argv;
     private HashMap FileTable = new HashMap(16);
 	private boolean[] FileDescriptorUsed = new boolean[16];
+	private int [] FilePosition = new int[16];
     
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';

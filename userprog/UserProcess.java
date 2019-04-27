@@ -440,7 +440,6 @@ public class UserProcess {
 	}
 	case syscallOpen: {
 		String FileName = readVirtualMemoryString(a0, 256);
-		System.out.println(FileName);
 		return handleOpen(FileName);
 	}
 	case syscallRead: {
@@ -471,6 +470,19 @@ public class UserProcess {
 			return -1;
 		FilePosition[a0] += writeLength;
 		return writeLength;
+	}
+	case syscallClose: {
+		OpenFile f = (OpenFile)FileTable.get(a0);
+		f.close();
+		FileDescriptorUsed[a0] = false;
+		FileTable.remove(a0);
+		return 0;
+	}
+	case syscallUnlink: {
+		String FileName = readVirtualMemoryString(a0, 256);
+		if (!ThreadedKernel.fileSystem.remove(FileName))
+			return -1;
+		return 0;
 	}
 
 	default:

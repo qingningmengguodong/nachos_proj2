@@ -28,10 +28,9 @@ public class UserProcess {
      * Allocate a new process.
      */
     public UserProcess() {
-	int numPhysPages = Machine.processor().getNumPhysPages();
 	pageTable = new TranslationEntry[numPhysPages];
-	for (int i=0; i<numPhysPages; i++)
-	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+	//for (int i=0; i<numPhysPages; i++)
+	//    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
 	for (int i=2; i<16; i++) {
 		FileDescriptorUsed[i] = false;
 		FilePosition[i] = 0;
@@ -147,8 +146,12 @@ public class UserProcess {
 	if (vaddr < 0 || vaddr >= memory.length)
 	    return 0;
 
-	int amount = Math.min(length, memory.length-vaddr);
-	System.arraycopy(memory, vaddr, data, offset, amount);
+	int VPN = Processor.pageFromAddress(vaddr);
+	int OFFSET = Processor.offsetFromAddress(vaddr);
+	int PPN = pageTable[VPN].ppn;
+	int paddr = Processor.makeAddress(PPN, OFFSET);
+	int amount = Math.min(length, memory.length-paddr);
+	System.arraycopy(memory, paddr, data, offset, amount);
 
 	return amount;
     }
@@ -190,8 +193,12 @@ public class UserProcess {
 	if (vaddr < 0 || vaddr >= memory.length)
 	    return 0;
 
-	int amount = Math.min(length, memory.length-vaddr);
-	System.arraycopy(data, offset, memory, vaddr, amount);
+	int VPN = Processor.pageFromAddress(vaddr);
+	int OFFSET = Processor.offsetFromAddress(vaddr);
+	int PPN = pageTable[VPN].ppn;
+	int paddr = Processor.makeAddress(PPN, OFFSET);
+	int amount = Math.min(length, memory.length-paddr);
+	System.arraycopy(data, offset, memory, paddr, amount);
 
 	return amount;
     }
@@ -283,6 +290,19 @@ public class UserProcess {
 
 	return true;
     }
+    
+    private int getFirstFreePage() {
+    	for (int i = 0; i < numPhysPages; i++)
+    		if (!UserKernel.PhysPageUsed[i]) {
+    			UserKernel.PhysPageUsed[i] = true;
+    			return i;
+    		}
+    	return -1;
+    }
+    
+    private void releasePage(int i) {
+    	UserKernel.PhysPageUsed[i] = false;
+    }
 
     /**
      * Allocates memory for this process, and loads the COFF sections into
@@ -304,13 +324,24 @@ public class UserProcess {
 	    
 	    Lib.debug(dbgProcess, "\tinitializing " + section.getName()
 		      + " section (" + section.getLength() + " pages)");
-
+	    //System.out.println("\tinitializing " + section.getName()
+		 //     + " section (" + section.getLength() + " pages)");
+		      
 	    for (int i=0; i<section.getLength(); i++) {
 		int vpn = section.getFirstVPN()+i;
+		int ppn = getFirstFreePage();
+		pageTable[vpn] = new TranslationEntry(vpn, ppn, true,false,false,false);
 
 		// for now, just assume virtual addresses=physical addresses
 		section.loadPage(i, vpn);
 	    }
+	}
+	
+	//load stack
+	for (int i=0; i<stackPages; i++) {
+		int vpn = numPages-1-stackPages+i;
+		int ppn = getFirstFreePage();
+		pageTable[vpn] = new TranslationEntry(vpn, ppn, true,false,false,false);
 	}
 	
 	return true;
@@ -538,6 +569,7 @@ public class UserProcess {
     private HashMap FileTable = new HashMap(16);
 	private boolean[] FileDescriptorUsed = new boolean[16];
 	private int [] FilePosition = new int[16];
+	private int numPhysPages = Machine.processor().getNumPhysPages();
     
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';

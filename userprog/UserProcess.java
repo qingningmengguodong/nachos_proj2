@@ -37,6 +37,8 @@ public class UserProcess {
 		FileDescriptorUsed[i] = false;
 		FilePosition[i] = 0;
 	}
+	FileTable.put(0, UserKernel.console.openForReading());
+	FileTable.put(1, UserKernel.console.openForWriting());
 	FileDescriptorUsed[0] = FileDescriptorUsed[1] = true;
     }
     
@@ -63,8 +65,8 @@ public class UserProcess {
 	if (!load(name, args))
 	    return false;
 	
-	new UThread(this).setName(name).fork();
-
+	UserKernel.correspondingThread[processID] = new UThread(this);
+	UserKernel.correspondingThread[processID].setName(name).fork();
 	return true;
     }
 
@@ -506,7 +508,12 @@ public class UserProcess {
 		break;
 	}
 	case syscallJoin: {
-		break;
+		if (UserKernel.sonProcess[processID][a0]) {
+			UserKernel.correspondingThread[a0].join();
+			return 1;
+		}
+		else
+			return -1;
 	}
 	case syscallCreate: {
 		String FileName = readVirtualMemoryString(a0, 256);
@@ -517,29 +524,37 @@ public class UserProcess {
 		return handleOpen(FileName);
 	}
 	case syscallRead: {
+		//check if a0 is a legal file descriptor
+		if (a0 < 0 || a0 > 16 || a0 == 1)
+			return -1;
+		
 		OpenFile f = (OpenFile)FileTable.get(a0);
-		byte[] buf = new byte[a2+1];
-		int readLength = f.read(FilePosition[a0], buf, 0, a2);
+		byte[] buf = new byte[a2];
+		int readLength = 0;
+		if (a0 > 1)
+		    readLength = f.read(FilePosition[a0], buf, 0, a2);
+		else
+			readLength = f.read(buf, 0, a2);
 		if (readLength != -1) {
 			writeVirtualMemory(a1, buf);
 			FilePosition[a0] += readLength;
  		}
-		//String content = new String(buf);
-		//System.out.println(content);
-		//System.out.println(readLength);
+
 		return readLength;
 	}
 	case syscallWrite: {
+		if (a0 < 0 || a0 > 16 || a0 == 0)
+			return -1;
+		
 		OpenFile f = (OpenFile)FileTable.get(a0);
 		byte[] buf = new byte[256];
-		//String str = readVirtualMemoryString(a1, 256);
-		//System.out.println(str);
-		//buf = str.getBytes();
 		readVirtualMemory(a1, buf);
 		
-		//String str = "I am so good!";
-		//byte[] buf = str.getBytes();
-		int writeLength = f.write(FilePosition[a0], buf, 0, a2);
+		int writeLength;
+	    if (a0 > 1)	
+		    writeLength = f.write(FilePosition[a0], buf, 0, a2);
+	    else
+	    	writeLength = f.write(buf, 0, a2);
 		if (writeLength == -1 || writeLength < a2)
 			return -1;
 		FilePosition[a0] += writeLength;

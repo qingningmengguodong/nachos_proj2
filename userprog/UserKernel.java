@@ -110,6 +110,9 @@ public class UserKernel extends ThreadedKernel {
     /** Globally accessible reference to the synchronized console. */
     public static SynchConsole console;
     public static boolean[] PhysPageUsed = new boolean[256];
+    public static int nextProcessID = 1;
+    public static int activeProcessCount = 0;
+    public static boolean[][] sonProcess = new boolean[16][16];
 
     // dummy variables to make javac smarter
     private static Coff dummy1 = null;

@@ -29,6 +29,8 @@ public class UserProcess {
      */
     public UserProcess() {
 	pageTable = new TranslationEntry[numPhysPages];
+	processID = UserKernel.nextProcessID++;
+	UserKernel.activeProcessCount++;
 	//for (int i=0; i<numPhysPages; i++)
 	//    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
 	for (int i=2; i<16; i++) {
@@ -324,8 +326,6 @@ public class UserProcess {
 	    
 	    Lib.debug(dbgProcess, "\tinitializing " + section.getName()
 		      + " section (" + section.getLength() + " pages)");
-	    //System.out.println("\tinitializing " + section.getName()
-		 //     + " section (" + section.getLength() + " pages)");
 		      
 	    for (int i=0; i<section.getLength(); i++) {
 		int vpn = section.getFirstVPN()+i;
@@ -333,12 +333,12 @@ public class UserProcess {
 		pageTable[vpn] = new TranslationEntry(vpn, ppn, true,false,false,false);
 
 		// for now, just assume virtual addresses=physical addresses
-		section.loadPage(i, vpn);
+		section.loadPage(i, ppn);
 	    }
 	}
 	
-	//load stack
-	for (int i=0; i<stackPages; i++) {
+	//load stack and the last page containing arguments
+	for (int i=0; i<stackPages+1; i++) {
 		int vpn = numPages-1-stackPages+i;
 		int ppn = getFirstFreePage();
 		pageTable[vpn] = new TranslationEntry(vpn, ppn, true,false,false,false);
@@ -351,6 +351,10 @@ public class UserProcess {
      * Release any resources allocated by <tt>loadSections()</tt>.
      */
     protected void unloadSections() {
+    	for (int i=0; i<numPages; i++) {
+			int ppn = pageTable[i].ppn;
+			releasePage(ppn);
+		}
     }    
 
     /**
@@ -380,9 +384,11 @@ public class UserProcess {
      * Handle the halt() system call. 
      */
     private int handleHalt() {
-
-	Machine.halt();
-	
+    // if the process is not the root process, return immediately
+    if (processID != 1)
+    	return 0;
+    
+	Machine.halt();	
 	Lib.assertNotReached("Machine.halt() did not halt machine!");
 	return 0;
     }
@@ -417,6 +423,14 @@ public class UserProcess {
     
     private int handleOpen(String FileName) {
     	return handleCreateOrOpen(FileName, false);
+    }
+    
+    private int handleClose(int fileDescriptor) {
+    	OpenFile f = (OpenFile)FileTable.get(fileDescriptor);
+		f.close();
+		FileDescriptorUsed[fileDescriptor] = false;
+		FileTable.remove(fileDescriptor);
+		return 0;
     }
 
 
@@ -461,10 +475,39 @@ public class UserProcess {
      * @return	the value to be returned to the user.
      */
     public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
-    System.out.println(syscall);
+    //System.out.println(syscall);
 	switch (syscall) {
-	case syscallHalt:
+	case syscallHalt: 
 	    return handleHalt();
+	case syscallExit: {
+		//Close open files
+		for (int i=2; i<16; i++)
+			if (FileDescriptorUsed[i] == true) 
+				handleClose(i);
+		
+		//Free up memory
+		unloadSections();
+		
+		UserKernel.activeProcessCount--;
+		if (UserKernel.activeProcessCount>0)
+			KThread.currentThread().finish();
+		else
+			Kernel.kernel.terminate();
+		break;
+	}
+	case syscallExec: {
+		String FileName = readVirtualMemoryString(a0, 256);
+		String[] argv = new String[0];
+		UserKernel.sonProcess[processID][UserKernel.nextProcessID] = true;
+		
+		UserProcess P = UserProcess.newUserProcess();		
+		Lib.assertTrue(P.execute(FileName, new String[] { }));
+
+		break;
+	}
+	case syscallJoin: {
+		break;
+	}
 	case syscallCreate: {
 		String FileName = readVirtualMemoryString(a0, 256);
 		return handleCreate(FileName);
@@ -503,11 +546,7 @@ public class UserProcess {
 		return writeLength;
 	}
 	case syscallClose: {
-		OpenFile f = (OpenFile)FileTable.get(a0);
-		f.close();
-		FileDescriptorUsed[a0] = false;
-		FileTable.remove(a0);
-		return 0;
+		return handleClose(a0);
 	}
 	case syscallUnlink: {
 		String FileName = readVirtualMemoryString(a0, 256);
@@ -570,6 +609,7 @@ public class UserProcess {
 	private boolean[] FileDescriptorUsed = new boolean[16];
 	private int [] FilePosition = new int[16];
 	private int numPhysPages = Machine.processor().getNumPhysPages();
+	private int processID;
     
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';

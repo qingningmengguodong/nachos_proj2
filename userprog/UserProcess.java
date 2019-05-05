@@ -86,6 +86,19 @@ public class UserProcess {
     }
 
     /**
+     * translate vaddr into paddr
+     */
+    public int translate(int vaddr, boolean write) {
+    	int VPN = Processor.pageFromAddress(vaddr);
+		int OFFSET = Processor.offsetFromAddress(vaddr);
+		if (write && pageTable[VPN].readOnly)
+			return -1;
+		
+		int PPN = pageTable[VPN].ppn;
+		return Processor.makeAddress(PPN, OFFSET);
+    }
+    
+    /**
      * Read a null-terminated string from this process's virtual memory. Read
      * at most <tt>maxLength + 1</tt> bytes from the specified address, search
      * for the null terminator, and convert it to a <tt>java.lang.String</tt>,
@@ -146,16 +159,62 @@ public class UserProcess {
 
 	byte[] memory = Machine.processor().getMemory();
 	
-	// for now, just assume that virtual addresses equal physical addresses
 	if (vaddr < 0 || vaddr >= memory.length)
 	    return 0;
 
-	int VPN = Processor.pageFromAddress(vaddr);
-	int OFFSET = Processor.offsetFromAddress(vaddr);
-	int PPN = pageTable[VPN].ppn;
-	int paddr = Processor.makeAddress(PPN, OFFSET);
-	int amount = Math.min(length, memory.length-paddr);
-	System.arraycopy(memory, paddr, data, offset, amount);
+	//next and last are virtual addresses!
+	int nextPageAddr = Processor.makeAddress(Processor.pageFromAddress(vaddr)+1, 0);
+	int lastPageAddr = Processor.makeAddress(Processor.pageFromAddress(vaddr+length), 0);
+	int amount = 0;
+	
+	if(lastPageAddr > (Processor.maxPages-1)*Processor.pageSize)
+		lastPageAddr = (Processor.maxPages-1)*Processor.pageSize;
+	
+	int paddr = translate(vaddr, false);
+	if (paddr == -1)
+		return 0;
+	if(nextPageAddr > lastPageAddr) {
+		amount = Math.min(length, memory.length-vaddr);
+		System.arraycopy(memory, paddr, data, offset, amount);
+	}
+	else{
+		int tmp;
+		tmp = nextPageAddr - vaddr;
+		System.arraycopy(memory, paddr, data, offset, tmp);
+		offset += tmp;
+		amount += tmp;
+		
+		if (nextPageAddr < lastPageAddr) {
+			for (int i = nextPageAddr; i<lastPageAddr; i++) {
+				paddr = translate(i, false);
+				if (paddr == -1)
+					return 0;
+				System.arraycopy(memory, paddr, data, offset, pageSize);
+				offset += pageSize;
+				amount += pageSize;
+			}
+		}
+		
+		tmp = Math.min(vaddr+length-lastPageAddr, memory.length-lastPageAddr);
+		paddr = translate(lastPageAddr, false);
+		if (paddr == -1)
+			return 0;
+		System.arraycopy(memory, paddr, data, offset, tmp);
+		amount += tmp;		
+	}
+	
+	/*
+	int totalPage = (int)(length / Processor.pageSize) + 1;
+	int VPN, PPN, OFFSET, paddr, amount = 0;
+	for (int i=0; i<totalPage; i++) {
+		VPN = Processor.pageFromAddress(vaddr);
+		OFFSET = Processor.offsetFromAddress(vaddr);
+		PPN = pageTable[VPN].ppn;
+		paddr = Processor.makeAddress(PPN, OFFSET);
+		amount = Math.min(length, memory.length-paddr);
+		System.arraycopy(memory, paddr, data, offset, amount);
+	}
+	*/
 
 	return amount;
     }
@@ -193,16 +252,48 @@ public class UserProcess {
 
 	byte[] memory = Machine.processor().getMemory();
 	
-	// for now, just assume that virtual addresses equal physical addresses
 	if (vaddr < 0 || vaddr >= memory.length)
 	    return 0;
 
-	int VPN = Processor.pageFromAddress(vaddr);
-	int OFFSET = Processor.offsetFromAddress(vaddr);
-	int PPN = pageTable[VPN].ppn;
-	int paddr = Processor.makeAddress(PPN, OFFSET);
-	int amount = Math.min(length, memory.length-paddr);
-	System.arraycopy(data, offset, memory, paddr, amount);
+	int nextPageAddr = Processor.makeAddress(Processor.pageFromAddress(vaddr)+1, 0);
+	int lastPageAddr = Processor.makeAddress(Processor.pageFromAddress(vaddr+length), 0);
+	int amount = 0;
+	
+	if(lastPageAddr > (Processor.maxPages-1)*Processor.pageSize)
+		lastPageAddr = (Processor.maxPages-1)*Processor.pageSize;
+	
+	int paddr = translate(vaddr, true);
+	if (paddr == -1)
+		return 0;
+	if(nextPageAddr > lastPageAddr) {
+		amount = Math.min(length, memory.length-vaddr);
+		System.arraycopy(data, offset, memory, paddr, amount);
+	}
+	else{
+		int tmp;
+		tmp = nextPageAddr - vaddr;
+		System.arraycopy(data, offset, memory, paddr, tmp);
+		offset += tmp;
+		amount += tmp;
+		
+		if (nextPageAddr < lastPageAddr) {
+			for (int i = nextPageAddr; i<lastPageAddr; i++) {
+				paddr = translate(i, false);
+				if (paddr == -1)
+					return 0;
+				System.arraycopy(data, offset, memory, paddr, pageSize);
+				offset += pageSize;
+				amount += pageSize;
+			}
+		}
+		
+		tmp = Math.min(vaddr+length-lastPageAddr, memory.length-lastPageAddr);
+		paddr = translate(lastPageAddr, true);
+		if (paddr == -1)
+			return 0;
+		System.arraycopy(data, offset, memory, paddr, tmp);
+		amount += tmp;		
+	}
 
 	return amount;
     }
@@ -296,16 +387,20 @@ public class UserProcess {
     }
     
     private int getFirstFreePage() {
+    	boolean intStatus = Machine.interrupt().disable();
     	for (int i = 0; i < numPhysPages; i++)
     		if (!UserKernel.PhysPageUsed[i]) {
     			UserKernel.PhysPageUsed[i] = true;
     			return i;
     		}
+    	Machine.interrupt().restore(intStatus);
     	return -1;
     }
     
     private void releasePage(int i) {
+    	boolean intStatus = Machine.interrupt().disable();
     	UserKernel.PhysPageUsed[i] = false;
+    	Machine.interrupt().restore(intStatus);
     }
 
     /**
@@ -333,6 +428,8 @@ public class UserProcess {
 		int vpn = section.getFirstVPN()+i;
 		int ppn = getFirstFreePage();
 		pageTable[vpn] = new TranslationEntry(vpn, ppn, true,false,false,false);
+		if (section.isReadOnly())
+			pageTable[vpn].readOnly = true;
 
 		// for now, just assume virtual addresses=physical addresses
 		section.loadPage(i, ppn);
@@ -434,6 +531,30 @@ public class UserProcess {
 		FileTable.remove(fileDescriptor);
 		return 0;
     }
+    
+    private void handleExit(int status) {
+    	//Close open files
+    	for (int i=0; i<16; i++)
+    		if (FileDescriptorUsed[i] == true) 
+    			handleClose(i);
+    			
+    	//Free up memory
+    	unloadSections();
+    			
+    	//It is no longer a child or parent of someone
+    	for (int i=1;i<=64;i++) {
+    		if (UserKernel.sonProcess[processID][i])
+    			UserKernel.sonProcess[processID][i] = false;
+    		if (UserKernel.sonProcess[i][processID])
+    			UserKernel.sonProcess[i][processID] = false;
+    	}
+    						
+    	UserKernel.activeProcessCount--;
+    	if (UserKernel.activeProcessCount>0)
+    		KThread.currentThread().finish();
+    	else
+    		Kernel.kernel.terminate();
+    }
 
 
     private static final int
@@ -477,40 +598,41 @@ public class UserProcess {
      * @return	the value to be returned to the user.
      */
     public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
-    //System.out.println(syscall);
 	switch (syscall) {
 	case syscallHalt: 
 	    return handleHalt();
 	case syscallExit: {
-		//Close open files
-		for (int i=2; i<16; i++)
-			if (FileDescriptorUsed[i] == true) 
-				handleClose(i);
-		
-		//Free up memory
-		unloadSections();
-		
-		UserKernel.activeProcessCount--;
-		if (UserKernel.activeProcessCount>0)
-			KThread.currentThread().finish();
-		else
-			Kernel.kernel.terminate();
+		handleExit(a0);
 		break;
 	}
 	case syscallExec: {
-		String FileName = readVirtualMemoryString(a0, 256);
-		String[] argv = new String[0];
+		String FileName = readVirtualMemoryString(a0, 256);		
+		String[] argv = new String[a1];
 		UserKernel.sonProcess[processID][UserKernel.nextProcessID] = true;
 		
-		UserProcess P = UserProcess.newUserProcess();		
-		Lib.assertTrue(P.execute(FileName, new String[] { }));
-
-		break;
+		//get argv
+		byte[] buf = new byte[4];
+		for (int i=0; i<a1 ; i++) {
+			if (readVirtualMemory(a2, buf)!= 4)
+				return -1;
+			int argAddr = Lib.bytesToInt(buf, 0, 4);
+			String arg = readVirtualMemoryString(argAddr, 256);
+			argv[i] = arg;
+			a2 += 4;
+		}
+		
+		UserProcess P = UserProcess.newUserProcess();
+		if (!P.execute(FileName, argv))
+			return -1;
+        return UserKernel.nextProcessID - 1;
 	}
 	case syscallJoin: {
 		if (UserKernel.sonProcess[processID][a0]) {
 			UserKernel.correspondingThread[a0].join();
-			return 1;
+			if (!UserKernel.abnormal[a0])
+				return 1;
+			else
+				return 0;
 		}
 		else
 			return -1;
@@ -536,7 +658,11 @@ public class UserProcess {
 		else
 			readLength = f.read(buf, 0, a2);
 		if (readLength != -1) {
-			writeVirtualMemory(a1, buf);
+			//how about part of buf is readonly?
+			int l = writeVirtualMemory(a1, buf);
+			if (l < readLength)
+				return -1;
+			
 			FilePosition[a0] += readLength;
  		}
 
@@ -548,7 +674,9 @@ public class UserProcess {
 		
 		OpenFile f = (OpenFile)FileTable.get(a0);
 		byte[] buf = new byte[256];
-		readVirtualMemory(a1, buf);
+		// if a1 is a bad addr?
+		if (readVirtualMemory(a1, buf)==0)
+			return -1;
 		
 		int writeLength;
 	    if (a0 > 1)	
@@ -603,7 +731,9 @@ public class UserProcess {
 	default:
 	    Lib.debug(dbgProcess, "Unexpected exception: " +
 		      Processor.exceptionNames[cause]);
-	    Lib.assertNotReached("Unexpected exception");
+	    //Lib.assertNotReached("Unexpected exception");
+	    UserKernel.abnormal[processID] = true;
+	    handleExit(-1);
 	}
     }
 

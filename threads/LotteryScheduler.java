@@ -167,18 +167,19 @@ public class LotteryScheduler extends Scheduler{
 	 *		return.
 	 */
 	protected ThreadState pickNextThread() {
+		ThreadState last = null, now;
 		int total_lottery = 0;
 		Iterator iter = waitingQueue.iterator();
 		while(iter.hasNext()) 
 			total_lottery += ((ThreadState)iter.next()).effectivePriority;
 		
+		if (total_lottery != 0) {
 		ThreadState chosen;
 		Random ra = new Random();
 		int flag = ra.nextInt(total_lottery);
 		
 		int tmp = 0;
-		iter = waitingQueue.iterator();
-		ThreadState last, now;
+		iter = waitingQueue.iterator();		
 		last = (ThreadState)iter.next();
 		if (last != null)
 		    tmp += last.effectivePriority;
@@ -197,6 +198,7 @@ public class LotteryScheduler extends Scheduler{
 		}
 		if (last != null)
 			last.waiting = null;
+		}
 		
 		return last;
 	}
@@ -388,7 +390,6 @@ public class LotteryScheduler extends Scheduler{
 		tq1.waitForAccess(kt_5);
 		
 		Lib.assertTrue(ThreadedKernel.scheduler.getEffectivePriority(kt_4)==16);
-		
 		System.out.println(tq1.nextThread().getName());
 		
 		Machine.interrupt().restore(status);

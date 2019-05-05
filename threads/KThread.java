@@ -195,6 +195,8 @@ public class KThread {
 
 	currentThread.status = statusFinished;
 	
+	currentThread.JoinSem.V();
+	
 	sleep();
     }
 
@@ -278,10 +280,7 @@ public class KThread {
 
 	Lib.assertTrue(this != currentThread);
 	
-	boolean intStatus = Machine.interrupt().disable();
-	if (status != statusFinished)
-	    run();
-    Machine.interrupt().restore(intStatus);
+	this.JoinSem.P();
 
     }
 
@@ -388,10 +387,10 @@ public class KThread {
     }
 
     private static class PingTest implements Runnable {
-	PingTest(int which) {
-	    this.which = which;
-	}
+    
+	PingTest(int which) {this.which = which;}
 	
+	/*
 	public void run() {
 	    for (int i=0; i<5; i++) {
 		System.out.println("*** thread " + which + " looped "
@@ -399,9 +398,13 @@ public class KThread {
 
 		currentThread.yield();
 	    }
-	}
-
-	private int which;
+	}	
+	*/
+	public void run() {
+		ThreadedKernel.alarm.waitUntil(10000000);
+		System.out.println("I am here!");	
+		}
+    private int which;
     }
 
     /**
@@ -410,8 +413,14 @@ public class KThread {
     public static void selfTest() {
 	Lib.debug(dbgThread, "Enter KThread.selfTest");
 	
-	new KThread(new PingTest(1)).setName("forked thread").fork();
-	new PingTest(0).run();
+	//new KThread(new PingTest(1)).setName("forked thread").fork();
+	//new PingTest(0).run();
+	
+	KThread K1 = new KThread(new PingTest(0));
+	K1.setName("forked thread").fork();
+	K1.join();
+	System.out.println("Now I am here!");
+	
     }
 
     private static final char dbgThread = 't';
@@ -438,6 +447,7 @@ public class KThread {
     private String name = "(unnamed thread)";
     private Runnable target;
     private TCB tcb;
+    private Semaphore JoinSem = new Semaphore(0); 
 
     /**
      * Unique identifer for this thread. Used to deterministically compare
